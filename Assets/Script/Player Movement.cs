@@ -7,77 +7,112 @@ public class PlayerMovement : MonoBehaviour
     //overall
     private Rigidbody2D rb;
     //jump
-    [SerializeField] private float jumpPower;
-    [SerializeField] private float jumpTime;
-    [SerializeField] private float jumpMultiplier;
-
-    //ground check
+    [SerializeField] private float jumpForce = 13f;
     [SerializeField] private Transform groundCheck;
-    [SerializeField] private LayerMask groundLayer;
-    //fall
-    [SerializeField] float fallMultiplier;
-    private Vector2 gravityVector;
-    //
-    bool isJumping;
-    float jumpCounter;
-    float yInput;
+    private Vector2 groundCheckSize = new Vector2(0.4f, 0.3f);
+    [SerializeField] LayerMask groundLayer;
+    private float maxFastFallSpeed = 50f;
+    public float LastPressedJumpTime;
+    public float LastOnGroundTime;
+    public float yInput;
+    public float xInput;
+    public bool IsJumping;
+    public bool IsFalling;
+    public float gravityMultiplier;
+    public float FallgravityMultiplier;
+    public bool jumpCut;
     // Start is called before the first frame update
     void Start()
     {
         rb = GetComponent<Rigidbody2D>();
-        gravityVector = new Vector2(0, -Physics2D.gravity.y);
-        float xInput = Input.GetAxisRaw("Horizontal");
-         yInput = Input.GetAxisRaw("Vertical");
+
+        
     }
 
     // Update is called once per frame
     void Update()
     {
-
-        if (Input.GetButtonDown("Jump") && isGrounded())
+        xInput = Input.GetAxisRaw("Horizontal");
+        yInput = Input.GetAxisRaw("Vertical");
+        if (!IsJumping)
         {
-            rb.AddForce(new Vector2(rb.velocity.x, yInput*jumpPower),ForceMode2D.Impulse);
-            isJumping = true;
-            jumpCounter = 0;
-        }
-        if (Input.GetButtonUp("Jump"))
-        {
-            isJumping = false;
-            if (rb.velocity.y > 0) {
-                rb.velocity = new Vector2(rb.velocity.x, rb.velocity.y * 0.6f);
-            }
-        }
-        if (rb.velocity.y > 0 && isJumping)
-        {
-            jumpCounter += Time.deltaTime;
-            if (jumpCounter > jumpTime)
+            //Ground Check
+            if (Physics2D.OverlapBox(groundCheck.position, groundCheckSize, 0, groundLayer) && !IsJumping) //checks if set box overlaps with ground
             {
-                isJumping = false;
+                LastOnGroundTime = 0.15f; //if so sets the lastGrounded to coyoteTime
             }
-            float t = jumpCounter / jumpTime;
-            float currentJump = jumpMultiplier;
-            if (t > 0.5f)
-            {
-                currentJump = jumpMultiplier * (0.1f);
-            }
-
-
-            rb.velocity += gravityVector * jumpMultiplier * Time.deltaTime;
         }
+
+
+        LastOnGroundTime -= Time.deltaTime;
+        LastPressedJumpTime -= Time.deltaTime;
+
+
+        if (Input.GetKeyDown(KeyCode.Space) || Input.GetKeyDown(KeyCode.C) || Input.GetKeyDown(KeyCode.J))
+        {
+
+            LastPressedJumpTime = 0.1f;
+        }
+        //jump
+        if (CanJump() && LastPressedJumpTime > 0)
+        {
+            IsJumping = true;
+            IsFalling = false;
+            jumpCut = false;
+            Jump();
+        }
+        if (IsJumping && rb.velocity.y < 0)
+        {
+            IsJumping = false;
+
+        }
+        if (LastOnGroundTime > 0 && !IsJumping)
+        {
+            jumpCut = false;
+            if (!IsJumping)
+            {
+                IsFalling = false;
+            }
+        }
+        //when player reach the max high of the jump
         if (rb.velocity.y < 0)
         {
-            //higer gravity while falling
-            //rb.gravityScale = 2 * fallMultiplier;
-            //rb.velocity -= gravityVector * fallMultiplier * Time.deltaTime;
-            rb.velocity = new Vector2(rb.velocity.x, Mathf.Max(rb.velocity.y, -50));
+            rb.gravityScale = gravityMultiplier;
 
+            rb.velocity = new Vector2(rb.velocity.x, Mathf.Max(rb.velocity.y, -maxFastFallSpeed));
         }
-        else {
-            rb.gravityScale = 1;
+        else if (rb.velocity.y < 0 && yInput < 0)//holding down key case
+        {
+            //Much higher gravity if holding down
+            rb.gravityScale = FallgravityMultiplier;
+            //Caps maximum fall speed, so when falling over large distances we don't accelerate to insanely high speeds
+            rb.velocity = new Vector2(rb.velocity.x, Mathf.Max(rb.velocity.y, -maxFastFallSpeed));
         }
+        else if (jumpCut)
+        {
+            rb.gravityScale = gravityMultiplier;
+            rb.velocity = new Vector2(rb.velocity.x, Mathf.Max(rb.velocity.y, -maxFastFallSpeed));
+        }
+        else if ((IsJumping || IsFalling) && Mathf.Abs(rb.velocity.y) < 0.5f)
+        {
+            rb.gravityScale = gravityMultiplier;
+        }
+
     }
-    private bool isGrounded()
-    {
-        return Physics2D.OverlapCapsule(groundCheck.position, new Vector2(0.4f, 0.3f), CapsuleDirection2D.Horizontal, 0, groundLayer);
-    }
+        void Jump()
+        {
+            LastPressedJumpTime = 0;
+            LastOnGroundTime = 0;
+            float force = jumpForce;
+            if (rb.velocity.y < 0)
+            {
+                force -= -rb.velocity.y;
+            }
+            rb.AddForce(Vector2.up * force, ForceMode2D.Impulse);
+        }
+        bool CanJump()
+        {
+            return LastOnGroundTime > 0 && !IsJumping;
+        }
+    
 }
