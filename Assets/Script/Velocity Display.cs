@@ -35,7 +35,7 @@ public class VelocityDisplay : MonoBehaviour
         textObject.transform.SetParent(canvas.transform);
         velocityText = textObject.AddComponent<Text>();
         velocityText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        velocityText.fontSize = 24;
+        velocityText.fontSize = 16;
         velocityText.color = Color.white;
     }
 
@@ -44,8 +44,9 @@ public class VelocityDisplay : MonoBehaviour
         // Update the displayed velocity
         if (rb != null && velocityText != null)
         {
+            float velocityX = rb.velocity.x;
             float velocityY = rb.velocity.y;
-            velocityText.text = $"Velocity Y: {velocityY:F2}";
+            velocityText.text = $"X: {velocityX:F2} \nY: {velocityY:F2}";
         }
     }
 }

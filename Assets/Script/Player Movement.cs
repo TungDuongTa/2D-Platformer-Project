@@ -43,6 +43,7 @@ public class PlayerMovement : MonoBehaviour
     public bool JumpCut;
     public float CoyoteTime;
     public float JumpBufferTime;
+    public float force;
 
     private enum movementState { idle, running, jumping, falling }
     movementState state;
@@ -104,15 +105,15 @@ public class PlayerMovement : MonoBehaviour
         if (IsJumping && rb.velocity.y < 0)
         {
             IsJumping = false;
+            IsFalling = true;
 
         }
         if (LastOnGroundTime > 0 && !IsJumping)
         {
             JumpCut = false;
-            if (!IsJumping)
-            {
-                IsFalling = false;
-            }
+            
+            IsFalling = false;
+            
         }
         
         // note that in if else block statement , if 2 cases that have 1 same condition, place the case that have more condition above. if you do the opposite, it will not work
@@ -152,10 +153,10 @@ public class PlayerMovement : MonoBehaviour
     {
         LastPressedJumpTime = 0;
         LastOnGroundTime = 0;
-        float force = jumpForce;
+        force = jumpForce;
         if (rb.velocity.y < 0)
         {
-            force -= -rb.velocity.y;
+            force -= rb.velocity.y;
         }
         rb.AddForce(Vector2.up * force, ForceMode2D.Impulse);
     }
