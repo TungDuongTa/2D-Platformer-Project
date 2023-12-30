@@ -4,9 +4,14 @@ using UnityEngine;
 
 public class PlayerMovement : MonoBehaviour
 {
+    //input
+    [SerializeField] private float yRawInput;
+    [SerializeField] private float xRawInput;
+    [SerializeField] private float yInput;
+    [SerializeField] private float xInput;
     //overall
     private Rigidbody2D rb;
-    private Vector2 groundCheckSize = new Vector2(0.5f, 0.1f);
+    private Vector2 groundCheckSize = new Vector2(1.3f, 0.2f);
     //jump
     [SerializeField] private float jumpForce = 13f;
     [SerializeField] private Transform groundCheck;
@@ -15,8 +20,7 @@ public class PlayerMovement : MonoBehaviour
     [SerializeField] private float maxFastFallSpeed;
     [SerializeField] private float LastPressedJumpTime;
     [SerializeField] private float LastOnGroundTime;
-    [SerializeField] private float yInput;
-    [SerializeField] private float xInput;
+    
 
     [SerializeField] private float gravityMultiplier;
     [SerializeField] private float FallgravityMultiplier;
@@ -28,6 +32,8 @@ public class PlayerMovement : MonoBehaviour
     [SerializeField] private float runMaxSpeed;
     [SerializeField] private float RunAccel;
     [SerializeField] private float RunDeccel;
+
+    [SerializeField] private SpriteRenderer sr;
     public float targetSpeed;
     public float accelRate;
     public float speedDif;
@@ -35,10 +41,17 @@ public class PlayerMovement : MonoBehaviour
     public bool IsJumping;
     public bool IsFalling;
     public bool JumpCut;
+    public float CoyoteTime;
+    public float JumpBufferTime;
 
+    private enum movementState { idle, running, jumping, falling }
+    movementState state;
+    private Animator playerAni;
     private void Awake()
     {
         rb = GetComponent<Rigidbody2D>();
+        sr= GetComponent<SpriteRenderer>();
+        playerAni = GetComponent<Animator>();
 
     }
     // Start is called before the first frame update
@@ -52,12 +65,13 @@ public class PlayerMovement : MonoBehaviour
     void Update()
     {
         KeyInput();
+        animationMovement();
         if (!IsJumping)
         {
             //Ground Check
             if (Physics2D.OverlapBox(groundCheck.position, groundCheckSize, 0, groundLayer) && !IsJumping) //checks if set box overlaps with ground
             {
-                LastOnGroundTime = 0.1f; //if so sets the lastGrounded to coyoteTime
+                LastOnGroundTime = CoyoteTime; //if so sets the lastGrounded to coyoteTime
             }
         }
 
@@ -68,8 +82,8 @@ public class PlayerMovement : MonoBehaviour
 
         if (Input.GetButtonDown("Jump"))
         {
-
-            LastPressedJumpTime = 0.1f;
+            
+            LastPressedJumpTime = JumpBufferTime;
         }
         if (Input.GetButtonUp("Jump"))
         {
@@ -84,6 +98,7 @@ public class PlayerMovement : MonoBehaviour
             IsJumping = true;
             IsFalling = false;
             JumpCut = false;
+            
             Jump();
         }
         if (IsJumping && rb.velocity.y < 0)
@@ -99,9 +114,9 @@ public class PlayerMovement : MonoBehaviour
                 IsFalling = false;
             }
         }
-        //when player reach the max high of the jump,gravity scale = 2.5 * 1.5 =3,75, max fall speeed=25f
+        
         // note that in if else block statement , if 2 cases that have 1 same condition, place the case that have more condition above. if you do the opposite, it will not work
-        if (rb.velocity.y < 0 && yInput < 0)//holding down key case, gravity scale= 2.5*2=5 max fast fall speed =30
+        if (rb.velocity.y < 0 && yRawInput < 0)//holding down key case, gravity scale= 2.5*2=5 max fast fall speed =30
         {
 
             rb.gravityScale = 2.5f * FastFallgravityMultiplier;
@@ -113,12 +128,13 @@ public class PlayerMovement : MonoBehaviour
             rb.gravityScale = 2.5f * JumpCutMultiplier;
             rb.velocity = new Vector2(rb.velocity.x, Mathf.Max(rb.velocity.y, -maxFastFallSpeed));
         }
-        /*else if ((IsJumping || IsFalling) && Mathf.Abs(rb.velocity.y) < 0.5f)
+        else if ((IsJumping) && Mathf.Abs(rb.velocity.y) < 5)//increase air time, also called jump hang
         {
-            rb.gravityScale = gravityMultiplier;
-        }*/
-        else if (rb.velocity.y < 0)
+            rb.gravityScale = 1.25f;
+        }
+        else if (rb.velocity.y < 0)//when player reach the max high of the jump,gravity scale = 2.5 * 1.5 =3,75, max fall speeed=25f
         {
+
             rb.gravityScale = 2.5f * FallgravityMultiplier;
 
             rb.velocity = new Vector2(rb.velocity.x, Mathf.Max(rb.velocity.y, -maxFallSpeed));
@@ -128,6 +144,8 @@ public class PlayerMovement : MonoBehaviour
             rb.gravityScale = 2.5f;
         }
 
+
+        
     }
     #region JUMP
     void Jump()
@@ -148,13 +166,15 @@ public class PlayerMovement : MonoBehaviour
     }
     void KeyInput()
     {
-        xInput = Input.GetAxisRaw("Horizontal");
+        xRawInput = Input.GetAxisRaw("Horizontal");
+        yRawInput = Input.GetAxisRaw("Vertical");
+        xInput = Input.GetAxis("Horizontal");
         yInput = Input.GetAxisRaw("Vertical");
     }
     private void Run(float lerpAmount)
     {
         //Calculate the direction we want to move in and our desired velocity
-         targetSpeed = xInput * runMaxSpeed;
+         targetSpeed = xRawInput * runMaxSpeed;
 
         //We can reduce are control using Lerp() this smooths changes to are direction and speed
         targetSpeed = Mathf.Lerp(rb.velocity.x, targetSpeed, lerpAmount);
@@ -182,7 +202,7 @@ public class PlayerMovement : MonoBehaviour
         }
         #region Add Bonus Jump Apex Acceleration
         //Increase are acceleration and maxSpeed when at the apex of their jump, makes the jump feel a bit more bouncy, responsive and natural
-        if ((IsJumping || IsFalling) && Mathf.Abs(rb.velocity.y) < 1)
+        if ((IsJumping || IsFalling) && Mathf.Abs(rb.velocity.y) < 5)
         {
             accelRate *= 1.1f;
             targetSpeed *= 1.3f;
@@ -225,6 +245,31 @@ public class PlayerMovement : MonoBehaviour
         Run(1);
 
 
+    }
+
+    void animationMovement() {
+        if (xRawInput > 0)
+        {
+            sr.flipX = false;
+            state = movementState.running;
+        }
+        else if (xRawInput < 0)
+        {
+            sr.flipX = true;
+            state = movementState.running;
+        }
+        else
+        {
+            state = movementState.idle;
+        }
+        if (rb.velocity.y > 0)
+        {
+            state = movementState.jumping;
+        }
+        else if (rb.velocity.y < 0) {
+            state = movementState.falling;
+        }
+        playerAni.SetInteger("state", (int)state);
     }
 
 
