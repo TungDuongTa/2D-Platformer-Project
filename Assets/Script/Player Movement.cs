@@ -12,11 +12,15 @@ public class PlayerMovement : MonoBehaviour
     //overall
     private Rigidbody2D rb;
     private Vector2 groundCheckSize = new Vector2(1.3f, 0.2f);
+    [SerializeField] private Vector2 wallCheckSize = new Vector2(0.1f, 1.5f);
     //jump
     [SerializeField] private float jumpForce = 13f;
     [SerializeField] private Transform groundCheck;
+    [SerializeField] private Transform frontWallCheck;
+    [SerializeField] private Transform backWallCheck;
 
     [SerializeField] LayerMask groundLayer;
+    [SerializeField] LayerMask wallLayer;
     [SerializeField] private float maxFastFallSpeed;
     [SerializeField] private float LastPressedJumpTime;
     [SerializeField] private float LastOnGroundTime;
@@ -44,8 +48,14 @@ public class PlayerMovement : MonoBehaviour
     public float CoyoteTime;
     public float JumpBufferTime;
     public float force;
-
-    private enum movementState { idle, running, jumping, falling }
+    public bool IsSliding;
+    public float LastOnWallRightTime;
+    public float LastOnWallLeftTime;
+    public float LastOnWallTime;
+    public bool IsWallJumping;
+    public bool IsDashing;
+    
+    private enum movementState { idle, running, jumping, falling,wallJump }
     movementState state;
     private Animator playerAni;
     private void Awake()
@@ -65,6 +75,10 @@ public class PlayerMovement : MonoBehaviour
     
     void Update()
     {
+        if (CanSlide() && ((LastOnWallLeftTime > 0 && xRawInput < 0) || (LastOnWallRightTime > 0 && xRawInput > 0)))
+            IsSliding = true;
+        else
+            IsSliding = false;
         KeyInput();
         animationMovement();
         if (!IsJumping)
@@ -74,11 +88,25 @@ public class PlayerMovement : MonoBehaviour
             {
                 LastOnGroundTime = CoyoteTime; //if so sets the lastGrounded to coyoteTime
             }
+            //Right Wall Check
+            if (((Physics2D.OverlapBox(frontWallCheck.position, wallCheckSize, 0, wallLayer) && !sr.flipX)
+                    || (Physics2D.OverlapBox(backWallCheck.position, wallCheckSize, 0, wallLayer) && sr.flipX)) )
+                LastOnWallRightTime = CoyoteTime;
+
+            //Right Wall Check
+            if (((Physics2D.OverlapBox(frontWallCheck.position, wallCheckSize, 0, wallLayer) && !sr.flipX)
+                || (Physics2D.OverlapBox(backWallCheck.position, wallCheckSize, 0, wallLayer) && sr.flipX)) )
+                LastOnWallLeftTime = CoyoteTime;
+            //Two checks needed for both left and right walls since whenever the play turns the wall checkPoints swap sides
+            LastOnWallTime = Mathf.Max(LastOnWallLeftTime, LastOnWallRightTime);
         }
 
 
         LastOnGroundTime -= Time.deltaTime;
         LastPressedJumpTime -= Time.deltaTime;
+        LastOnWallTime -= Time.deltaTime;
+        LastOnWallRightTime -= Time.deltaTime;
+        LastOnWallLeftTime -= Time.deltaTime;
 
 
         if (Input.GetButtonDown("Jump"))
@@ -115,9 +143,12 @@ public class PlayerMovement : MonoBehaviour
             IsFalling = false;
             
         }
-        
+
+        if (IsSliding) {
+            rb.gravityScale = 0;
+        }
         // note that in if else block statement , if 2 cases that have 1 same condition, place the case that have more condition above. if you do the opposite, it will not work
-        if (rb.velocity.y < 0 && yRawInput < 0)//holding down key case, gravity scale= 2.5*2=5 max fast fall speed =30
+        else if (rb.velocity.y < 0 && yRawInput < 0)//holding down key case, gravity scale= 2.5*2=5 max fast fall speed =30
         {
 
             rb.gravityScale = 2.5f * FastFallgravityMultiplier;
@@ -244,12 +275,14 @@ public class PlayerMovement : MonoBehaviour
         //Handle Run
 
         Run(1);
+        if (IsSliding)
+            Slide();
 
 
     }
 
     void animationMovement() {
-        if (xRawInput > 0)
+        if (xRawInput > .1f)
         {
             sr.flipX = false;
             state = movementState.running;
@@ -263,16 +296,50 @@ public class PlayerMovement : MonoBehaviour
         {
             state = movementState.idle;
         }
-        if (rb.velocity.y > 0)
+        if (rb.velocity.y > .1f)
         {
             state = movementState.jumping;
         }
-        else if (rb.velocity.y < 0) {
+
+        else if (rb.velocity.y < 0 && rb.gravityScale == 0f)
+        {
+            state = movementState.wallJump;
+        }
+        else if (rb.velocity.y < 0)
+        {
             state = movementState.falling;
+        }
+        else if (rb.velocity.y == 0 && rb.velocity.x == 0) {
+            state = movementState.idle;
         }
         playerAni.SetInteger("state", (int)state);
     }
+    public bool CanSlide()
+    {
+        if (LastOnWallTime > 0 && !IsJumping && LastOnGroundTime <= 0)
+            return true;
+        else
+            return false;
+    }
 
+    private void Slide()
+    {
+        //We remove the remaining upwards Impulse to prevent upwards sliding
+        if (rb.velocity.y > 0)
+        {
+            rb.AddForce(-rb.velocity.y * Vector2.up, ForceMode2D.Impulse);
+        }
+
+        //Works the same as the Run but only in the y-axis
+        //THis seems to work fine, buit maybe you'll find a better way to implement a slide into this system
+        float speedDif = 0 - rb.velocity.y;
+        float movement = speedDif * 0;
+        //So, we clamp the movement here to prevent any over corrections (these aren't noticeable in the Run)
+        //The force applied can't be greater than the (negative) speedDifference * by how many times a second FixedUpdate() is called. For more info research how force are applied to rigidbodies.
+        movement = Mathf.Clamp(movement, -Mathf.Abs(speedDif) * (1 / Time.fixedDeltaTime), Mathf.Abs(speedDif) * (1 / Time.fixedDeltaTime));
+
+        rb.AddForce(movement * Vector2.up);
+    }
 
 }
 
