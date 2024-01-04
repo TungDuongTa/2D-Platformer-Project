@@ -356,7 +356,7 @@ public class BetterPlayerMovement : MonoBehaviour
 
 
         //Gets an acceleration value based on if we are accelerating (includes turning) 
-        //or trying to decelerate (stop). As well as applying a multiplier if we're air borne.
+        //or trying to decelerate (stop). As w'ell as applying a multiplier if were air borne.
         if (LastOnGroundTime > 0)
             accelRate = (Mathf.Abs(targetSpeed) > 0.01f) ? Data.runAccelAmount : Data.runDeccelAmount;
         else
