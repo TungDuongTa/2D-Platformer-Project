@@ -16,6 +16,7 @@ public class PlayerMovement : MonoBehaviour
     private enum movementState { idle, running, jumping, falling, wallJump }
     movementState state;
     private Animator playerAni;
+
     [Header("Check Size/Layer")]
     private Vector2 groundCheckSize = new Vector2(1.3f, 0.2f);
     private Vector2 wallCheckSize = new Vector2(0.1f, 1.5f);
@@ -61,10 +62,18 @@ public class PlayerMovement : MonoBehaviour
     [SerializeField] private float LastOnWallTime;
     //Wall Jump
     private float _wallJumpStartTime;
-    private int _lastWallJumpDir;
+    private int LastWallJumpDir;
 
     public bool IsFacingRight;
     public bool WallGrab;
+    public bool hasDashed;
+
+    private int _dashesLeft;
+    private bool _dashRefilling;
+    private Vector2 _lastDashDir;
+    private bool _isDashAttacking;
+    public float LastPressedDashTime;
+    public float SlideaccelRate;
     private void OnValidate()
     {
         //all these function below is to ensure that player can reach the desired height(jumpHeight) in desired time(jumpTimeToApex)
@@ -93,11 +102,19 @@ public class PlayerMovement : MonoBehaviour
     private void FixedUpdate()
     {
         //Handle Run
-
-        if (IsWallJumping)
+        if (!IsDashing)
+        {
+            if (IsWallJumping)
+                Run(0.5f);
+            else
+                Run(1);
+        }
+        else if (_isDashAttacking)
+        {
             Run(0.5f);
-        else
-            Run(1f);
+        }
+
+        //Handle Slide
         if (IsSliding)
             Slide();
 
@@ -108,7 +125,7 @@ public class PlayerMovement : MonoBehaviour
 
 
 
-        if (CanSlide() && ((LastOnWallTime > 0 && xRawInput != 0)))
+        if (CanSlide() && ((LastOnWallLeftTime > 0 && xRawInput < -.1f) || (LastOnWallRightTime > 0 && xRawInput > .1f)))
             IsSliding = true;
         else
             IsSliding = false;
@@ -124,8 +141,11 @@ public class PlayerMovement : MonoBehaviour
         LastOnWallTime -= Time.deltaTime;
         LastOnWallRightTime -= Time.deltaTime;
         LastOnWallLeftTime -= Time.deltaTime;
-
-
+        LastPressedDashTime -= Time.deltaTime;
+        if (Input.GetKeyDown(KeyCode.Mouse1) || Input.GetKeyDown(KeyCode.LeftShift) || Input.GetKeyDown(KeyCode.K))
+        {
+            LastPressedDashTime = CoyoteTime;
+        }
         if (Input.GetButtonDown("Jump"))
         {
 
@@ -133,7 +153,7 @@ public class PlayerMovement : MonoBehaviour
         }
         if (Input.GetButtonUp("Jump"))
         {
-            if (CanJumpCut())
+            if (CanJumpCut() || CanWallJumpCut())
             {
                 IsJumpCut = true;
             }
@@ -144,7 +164,8 @@ public class PlayerMovement : MonoBehaviour
             WallGrab = true;
             IsSliding = false;
         }
-        else if (Input.GetButtonUp("Fire1") || LastOnWallTime < 0) { 
+        else if (Input.GetButtonUp("Fire1") || LastOnWallTime < 0)
+        {
             WallGrab = false;
             IsSliding = false;
         }
@@ -174,27 +195,51 @@ public class PlayerMovement : MonoBehaviour
             float WallslideMovement = WallspeedDifference * WallSlideaccelRate;
             rb.AddForce(Vector2.up * WallslideMovement, ForceMode2D.Force);
         }
-        //jump
-        if (CanJump() && LastPressedJumpTime > 0)
+        if (!IsDashing)
         {
-            IsJumping = true;
-            IsWallJumping = false;
-            IsFalling = false;
-            IsJumpCut = false;
+            //jump
+            if (CanJump() && LastPressedJumpTime > 0)
+            {
+                IsJumping = true;
+                IsWallJumping = false;
+                IsFalling = false;
+                IsJumpCut = false;
 
-            Jump();
-        }//WALL JUMP
-        else if (CanWallJump() && LastPressedJumpTime > 0)
+                Jump();
+            }//WALL JUMP
+            else if (CanWallJump() && LastPressedJumpTime > 0)
+            {
+                IsWallJumping = true;
+                IsJumping = false;
+                IsJumpCut = false;
+                IsFalling = false;
+
+                _wallJumpStartTime = Time.time;
+                LastWallJumpDir = (LastOnWallRightTime > 0) ? -1 : 1;
+
+                WallJump(LastWallJumpDir);
+            }
+        }
+        if (CanDash() && LastPressedDashTime > 0)
         {
-            IsWallJumping = true;
+            //Freeze game for split second. Adds juiciness and a bit of forgiveness over directional input
+            Sleep(0.05f);
+
+            //If not direction pressed, dash forward
+            Vector2 _moveInput = new Vector2(xRawInput, yRawInput);
+            if (_moveInput != Vector2.zero)
+                _lastDashDir = _moveInput;
+            else
+                _lastDashDir = IsFacingRight ? Vector2.right : Vector2.left;
+
+
+
+            IsDashing = true;
             IsJumping = false;
+            IsWallJumping = false;
             IsJumpCut = false;
-            IsFalling = false;
 
-            _wallJumpStartTime = Time.time;
-            _lastWallJumpDir = (LastOnWallRightTime > 0) ? -1 : 1;
-
-            WallJump(_lastWallJumpDir);
+            StartCoroutine(nameof(StartDash), _lastDashDir);
         }
 
 
@@ -204,7 +249,7 @@ public class PlayerMovement : MonoBehaviour
             IsFalling = true;
 
         }
-        if (IsWallJumping && Time.time - _wallJumpStartTime > 0.15)
+        if (IsWallJumping && Time.time - _wallJumpStartTime > 0.15f)
         {
             IsWallJumping = false;
         }
@@ -221,39 +266,54 @@ public class PlayerMovement : MonoBehaviour
 
 
     }
+
+
+
+
+
+
+
     #region gravity scale and jump scale
-    private void GravityScale() {
-        if (IsSliding)
+    private void GravityScale()
+    {
+        if (!_isDashAttacking)
         {
-            rb.gravityScale = 0;
-        }
-        // note that in if else block statement , if 2 cases that have 1 same condition, place the case that have more condition above. if you do the opposite, it will not work
-        else if (rb.velocity.y < 0 && yRawInput < 0)//holding down key case, gravity scale= 2.5*2=5 max fast fall speed =30
-        {
+            if (IsSliding)
+            {
+                rb.gravityScale = 0;
+            }
+            // note that in if else block statement , if 2 cases that have 1 same condition, place the case that have more condition above. if you do the opposite, it will not work
+            else if (rb.velocity.y < 0 && yRawInput < 0)//holding down key case, gravity scale= 2.5*2=5 max fast fall speed =30
+            {
 
-            rb.gravityScale = gravityScale * FastFallgravityMultiplier;
+                rb.gravityScale = gravityScale * FastFallgravityMultiplier;
 
-            rb.velocity = new Vector2(rb.velocity.x, Mathf.Max(rb.velocity.y, -maxFastFallSpeed));
-        }
-        else if (IsJumpCut)//when the jump button is release,gravity scale= 2.5*2=5,max fast fall speed =30
-        {
-            rb.gravityScale = gravityScale * JumpCutMultiplier;
-            rb.velocity = new Vector2(rb.velocity.x, Mathf.Max(rb.velocity.y, -maxFastFallSpeed));
-        }
-        else if ((IsJumping || IsFalling || IsWallJumping) && Mathf.Abs(rb.velocity.y) < 5)//increase air time, also called jump hang
-        {
-            rb.gravityScale = gravityScale / 2;
-        }
-        else if (rb.velocity.y < 0)//when player reach the max high of the jump,gravity scale = 2.5 * 1.5 =3,75, max fall speeed=25f
-        {
+                rb.velocity = new Vector2(rb.velocity.x, Mathf.Max(rb.velocity.y, -maxFastFallSpeed));
+            }
+            else if (IsJumpCut)//when the jump button is release,gravity scale= 2.5*2=5,max fast fall speed =30
+            {
+                rb.gravityScale = gravityScale * JumpCutMultiplier;
+                rb.velocity = new Vector2(rb.velocity.x, Mathf.Max(rb.velocity.y, -maxFastFallSpeed));
+            }
+            else if ((IsJumping || IsFalling || IsWallJumping) && Mathf.Abs(rb.velocity.y) < 5)//increase air time, also called jump hang
+            {
+                rb.gravityScale = gravityScale / 2;
+            }
+            else if (rb.velocity.y < 0)//when player reach the max high of the jump,gravity scale = 2.5 * 1.5 =3,75, max fall speeed=25f
+            {
 
-            rb.gravityScale = gravityScale * FallgravityMultiplier;
+                rb.gravityScale = gravityScale * FallgravityMultiplier;
 
-            rb.velocity = new Vector2(rb.velocity.x, Mathf.Max(rb.velocity.y, -maxFallSpeed));
+                rb.velocity = new Vector2(rb.velocity.x, Mathf.Max(rb.velocity.y, -maxFallSpeed));
+            }
+            else
+            {
+                rb.gravityScale = gravityScale;
+            }
         }
         else
         {
-            rb.gravityScale = gravityScale;
+            rb.gravityScale = 0;
         }
     }
     #endregion\
@@ -288,8 +348,9 @@ public class PlayerMovement : MonoBehaviour
         targetSpeed = xRawInput * runMaxSpeed;
 
         //We can reduce are control using Lerp() this smooths changes to are direction and speed
-        targetSpeed = Mathf.Lerp(rb.velocity.x, targetSpeed, lerpAmount);
+        float interpolatedSpeed = Mathf.Lerp(rb.velocity.x, targetSpeed, lerpAmount);
         //
+        float clampedSpeed = Mathf.Clamp(interpolatedSpeed, -runMaxSpeed, runMaxSpeed);
 
         if (LastOnGroundTime > 0)
             if (Mathf.Abs(targetSpeed) > 0.01f)
@@ -332,7 +393,7 @@ public class PlayerMovement : MonoBehaviour
         #endregion
 
         //Calculate difference between current velocity and desired velocity
-        speedDif = targetSpeed - rb.velocity.x;
+        speedDif = clampedSpeed - rb.velocity.x;
         //Calculate force along x-axis to apply to thr player
 
         movement = speedDif * accelRate;
@@ -351,18 +412,18 @@ public class PlayerMovement : MonoBehaviour
     #region Animaiton Handling
     void animationMovement()
     {
-        if (xRawInput !=-0f|| xRawInput != -0 && rb.velocity.y == 0)
+        if (xRawInput != -0f || xRawInput != -0 && rb.velocity.y == 0)
         {
             Flip();
             state = movementState.running;
-            
+
         }
         else
         {
             state = movementState.idle;
-            
+
         }
-        
+
 
         if (rb.velocity.y > .1f)
         {
@@ -379,7 +440,7 @@ public class PlayerMovement : MonoBehaviour
         }
 
         playerAni.SetInteger("state", (int)state);
-        
+
 
     }
     #endregion
@@ -415,17 +476,34 @@ public class PlayerMovement : MonoBehaviour
     private void Slide()//same as horizontal move, it just verticle
     {
         float targetSlideSpeed;
-        float SlideaccelRate = 3;
+
         // Calculate the desired slide speed 
+        if (yRawInput < 0)
+        {
+            targetSlideSpeed = -15f;
+        }
+        else {
+            targetSlideSpeed = -2f;
+        }
         
+        // slideSpeed
         
-            targetSlideSpeed = -3f; // slideSpeed
-        
-        
+
         // Remove the remaining upwards velocity to prevent upwards sliding and make sure y velocity dont excced target speed
-        if (rb.velocity.y > 0 || rb.velocity.y < targetSlideSpeed)
+        if ((rb.velocity.y > 0 ) && !IsWallJumping)
         {
             rb.AddForce(-rb.velocity.y * Vector2.up, ForceMode2D.Impulse);
+        }
+        if (rb.velocity.y < targetSlideSpeed)
+        {
+            SlideaccelRate = 5;
+        }
+        else if (yRawInput < 0) {
+            SlideaccelRate = 1;
+        }
+        else
+        {
+            SlideaccelRate = 2;
         }
 
         targetSlideSpeed = Mathf.Lerp(rb.velocity.y, targetSlideSpeed, 1);
@@ -440,8 +518,9 @@ public class PlayerMovement : MonoBehaviour
     #endregion
 
     #region Ground/Wall Check
-    private void GroundWallCheck() {
-        if (!IsJumping)
+    private void GroundWallCheck()
+    {
+        if (!IsJumping && !IsDashing)
         {
             //Ground Check
             if (Physics2D.OverlapBox(groundCheck.position, groundCheckSize, 0, groundLayer) && !IsJumping) //checks if set box overlaps with ground
@@ -476,47 +555,123 @@ public class PlayerMovement : MonoBehaviour
     #region Wall Jump
     private void WallJump(int dir)
     {
-        //Ensures we can't call Wall Jump multiple times from one press
+        // Ensures we can't call Wall Jump multiple times from one press
         LastPressedJumpTime = 0;
         LastOnGroundTime = 0;
         LastOnWallRightTime = 0;
         LastOnWallLeftTime = 0;
 
         // Perform Wall Jump
-        Vector2 force = new Vector2(15, 25);
-        force.x *= dir; //apply force in opposite direction of wall
+        Vector2 force = new Vector2(17, 25);
+        force.x *= dir; // apply force in the opposite direction of the wall
 
         if (Mathf.Sign(rb.velocity.x) != Mathf.Sign(force.x))
             force.x -= rb.velocity.x;
 
-        if (rb.velocity.y < 0) //checks whether player is falling, if so we subtract the velocity.y (counteracting force of gravity). This ensures the player always reaches our desired jump force or greater
+        if (rb.velocity.y < 0) // checks whether the player is falling, if so we subtract the velocity.y (counteracting force of gravity). This ensures the player always reaches our desired jump force or greater
             force.y -= rb.velocity.y;
 
-        //Unlike in the run we want to use the Impulse mode.
-        //The default mode will apply are force instantly ignoring masss
+        // Use AddForce with Impulse mode for wall jump
         rb.AddForce(force, ForceMode2D.Impulse);
-
-
+        Debug.Log($"Wall Jump Force - X: {force.x}, Y: {force.y}");
     }
     private bool CanWallJump()
     {
         return LastPressedJumpTime > 0 && LastOnWallTime > 0 && LastOnGroundTime <= 0 && (!IsWallJumping ||
-             (LastOnWallRightTime > 0 && _lastWallJumpDir == 1) || (LastOnWallLeftTime > 0 && _lastWallJumpDir == -1));
+             (LastOnWallRightTime > 0 && LastWallJumpDir == 1) || (LastOnWallLeftTime > 0 && LastWallJumpDir == -1));
     }
     #endregion
 
 
     private void Flip()
     {
-        if (IsFacingRight && xRawInput < 0 || !IsFacingRight && xRawInput > 0) {
+        if (IsFacingRight && xRawInput < 0 || !IsFacingRight && xRawInput > 0)
+        {
             IsFacingRight = !IsFacingRight;
             Vector3 scale = transform.localScale;
             scale.x *= -1;
-            transform.localScale = scale;     
+            transform.localScale = scale;
         }
         //stores scale and flips the player along the x axis, 
-        
+
     }
-    
+    private bool CanWallJumpCut()
+    {
+        return IsWallJumping && rb.velocity.y > 0;
+    }
+    private IEnumerator StartDash(Vector2 dir)
+    {
+        //Overall this method of dashing aims to mimic Celeste, if you're looking for
+        // a more physics-based approach try a method similar to that used in the jump
+
+        LastOnGroundTime = 0;
+        LastPressedDashTime = 0;
+
+        float startTime = Time.time;
+
+        _dashesLeft--;
+        _isDashAttacking = true;
+
+        rb.gravityScale = 0;
+
+        //We keep the player's velocity at the dash speed during the "attack" phase (in celeste the first 0.15s)
+        while (Time.time - startTime <= 0.15)
+        {
+            rb.velocity = dir.normalized * 20;
+            //Pauses the loop until the next frame, creating something of a Update loop. 
+            //This is a cleaner implementation opposed to multiple timers and this coroutine approach is actually what is used in Celeste :D
+            yield return null;
+        }
+
+        startTime = Time.time;
+
+        _isDashAttacking = false;
+
+        //Begins the "end" of our dash where we return some control to the player but still limit run acceleration (see Update() and Run())
+        rb.gravityScale = gravityScale;
+        rb.velocity = new Vector2(15, 15) * dir.normalized;
+
+        while (Time.time - startTime <= 0.15)
+        {
+            yield return null;
+        }
+
+        //Dash over
+        IsDashing = false;
+    }
+
+    //Short period before the player is able to dash again
+    private IEnumerator RefillDash(int amount)
+    {
+        //SHoet cooldown, so we can't constantly dash along the ground, again this is the implementation in Celeste, feel free to change it up
+        _dashRefilling = true;
+        yield return new WaitForSeconds(0.1f);
+        _dashRefilling = false;
+        _dashesLeft = Mathf.Min(1, _dashesLeft + 1);
+    }
+    private void Sleep(float duration)
+    {
+        //Method used so we don't need to call StartCoroutine everywhere
+        //nameof() notation means we don't need to input a string directly.
+        //Removes chance of spelling mistakes and will improve error messages if any
+        StartCoroutine(nameof(PerformSleep), duration);
+    }
+
+    private IEnumerator PerformSleep(float duration)
+    {
+        Time.timeScale = 0;
+        yield return new WaitForSecondsRealtime(duration); //Must be Realtime since timeScale with be 0 
+        Time.timeScale = 1;
+    }
+    private bool CanDash()
+    {
+        if (!IsDashing && _dashesLeft < 1 && LastOnGroundTime > 0 && !_dashRefilling)
+        {
+            StartCoroutine(nameof(RefillDash), 1);
+        }
+
+        return _dashesLeft > 0;
+    }
+
 }
 
