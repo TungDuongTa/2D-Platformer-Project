@@ -241,6 +241,20 @@ public class PlayerMovement : MonoBehaviour
 
             StartCoroutine(nameof(StartDash), _lastDashDir);
         }
+        // Cancel Dash with Jump
+        if (IsDashing && Input.GetButtonDown("Jump"))
+        {
+            // Modify the jump force based on the dash velocity
+            float dashVelocityX = rb.velocity.x;
+            float additionalForce = Mathf.Abs(dashVelocityX) * 0.5f; // Adjust the multiplier as needed
+
+            // Apply the jump force with additional force from the dash
+            rb.velocity = new Vector2(rb.velocity.x, 0); // Reset vertical velocity
+            rb.AddForce(Vector2.up * (jumpForce + additionalForce), ForceMode2D.Impulse);
+
+            // End the dash
+            IsDashing = false;
+        }
 
 
         if (IsJumping && rb.velocity.y < 0)
@@ -425,7 +439,7 @@ public class PlayerMovement : MonoBehaviour
         }
 
 
-        if (rb.velocity.y > .1f)
+        if (rb.velocity.y > .1f&& (Input.GetButton("Jump")||Input.GetButtonUp("Jump")))
         {
             state = movementState.jumping;
         }
@@ -617,7 +631,7 @@ public class PlayerMovement : MonoBehaviour
         //We keep the player's velocity at the dash speed during the "attack" phase (in celeste the first 0.15s)
         while (Time.time - startTime <= 0.15)
         {
-            rb.velocity = dir.normalized * 20;
+            rb.velocity = dir.normalized * 30;
             //Pauses the loop until the next frame, creating something of a Update loop. 
             //This is a cleaner implementation opposed to multiple timers and this coroutine approach is actually what is used in Celeste :D
             yield return null;
